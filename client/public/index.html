@@ -7,35 +7,50 @@
     <style>
       body {
         font-family: Arial, sans-serif;
-        max-width: 800px;
+        max-width: 1200px;
         margin: 0 auto;
         padding: 20px;
+        background-color: #f5f5f5;
       }
       .template-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: 20px;
         margin-top: 20px;
       }
       .template-card {
-        border: 1px solid #ddd;
+        background: white;
+        border: 1px solid #e0e0e0;
         padding: 20px;
-        border-radius: 8px;
+        border-radius: 12px;
         cursor: pointer;
-        transition: transform 0.2s;
+        transition: all 0.3s ease;
       }
       .template-card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+      }
+      .template-card h3 {
+        margin: 0 0 10px 0;
+        color: #2c3e50;
+      }
+      .template-card p {
+        color: #666;
+        margin: 0;
+      }
+      .template-card .tech-stack {
+        margin-top: 15px;
+        font-size: 0.9em;
+        color: #888;
       }
       .loading {
         opacity: 0.5;
         pointer-events: none;
       }
       #status {
-        padding: 10px;
-        margin: 10px 0;
-        border-radius: 4px;
+        padding: 15px;
+        margin: 15px 0;
+        border-radius: 8px;
         display: none;
       }
       .error {
@@ -48,10 +63,25 @@
         color: #2e7d32;
         display: block;
       }
+      .header {
+        text-align: center;
+        margin-bottom: 40px;
+      }
+      .header h1 {
+        color: #2c3e50;
+        margin-bottom: 10px;
+      }
+      .header p {
+        color: #666;
+        margin: 0;
+      }
     </style>
   </head>
   <body>
-    <h1>Choose a Template</h1>
+    <div class="header">
+      <h1>Choose Your Development Environment</h1>
+      <p>Select a template to start coding right away</p>
+    </div>
     <div id="status"></div>
     <div class="template-grid" id="templateGrid"></div>
 
@@ -60,17 +90,26 @@
         {
           id: "react",
           name: "React Project",
-          description: "Start a new React.js project",
-        },
-        {
-          id: "vanilla",
-          name: "HTML/CSS/JS",
-          description: "Start with basic web technologies",
+          description: "Modern React.js development environment",
+          techStack: "React, Create React App, ESLint, Prettier",
         },
         {
           id: "node",
-          name: "Node.js",
-          description: "Start a Node.js backend project",
+          name: "Node.js Backend",
+          description: "Express.js backend development setup",
+          techStack: "Node.js, Express, Cors, Dotenv",
+        },
+        {
+          id: "python",
+          name: "Python Flask",
+          description: "Python web development environment",
+          techStack: "Python, Flask, Virtual Environment",
+        },
+        {
+          id: "vue",
+          name: "Vue.js Project",
+          description: "Vue 3 frontend development setup",
+          techStack: "Vue 3, Vuex, Axios, ESLint",
         },
       ];
 
@@ -79,6 +118,9 @@
           <div class="template-card" onclick="startTemplate('${template.id}')">
             <h3>${template.name}</h3>
             <p>${template.description}</p>
+            <div class="tech-stack">
+              <small>Tech Stack: ${template.techStack}</small>
+            </div>
           </div>
         `;
       }
@@ -96,13 +138,17 @@
         showStatus("Starting editor...", "success");
 
         try {
-          const response = await fetch("http://localhost:3000/start-editor", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ template: templateId }),
-          });
+          showStatus(`Preparing ${templateId} environment...`, "success");
+          const response = await fetch(
+            "http://localhost:3000/api/editor/start-editor",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ template: templateId }),
+            }
+          );
 
           const data = await response.json();
 
@@ -111,7 +157,7 @@
           }
 
           if (data.url) {
-            showStatus("Editor started! Redirecting...", "success");
+            showStatus("Editor ready! Redirecting...", "success");
             console.log("Opening URL:", data.url);
             setTimeout(() => {
               window.location.href = data.url;

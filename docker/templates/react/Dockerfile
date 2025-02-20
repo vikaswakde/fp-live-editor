@@ -3,8 +3,9 @@ FROM codercom/code-server:latest
 # Install Node.js and npm
 RUN sudo apt-get update && \
     sudo apt-get install -y curl && \
-    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && \
-    sudo apt-get install -y nodejs
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && \
+    sudo apt-get install -y nodejs && \
+    sudo npm install -g npm@10.2.4
 
 # Create workspace directory
 WORKDIR /home/coder/project
