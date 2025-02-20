@@ -67,13 +67,18 @@ app.post("/start-editor", async (req, res) => {
         PortBindings: {
           "8080/tcp": [{ HostPort: port.toString() }],
         },
-        Binds: ["/var/run/docker.sock:/var/run/docker.sock"],
       },
       Env: [
-        "AUTH=none", // Disable authentication
-        "CS_DISABLE_FILE_DOWNLOADS=false",
+        "CS_DISABLE_AUTH=true",
+        "CS_AUTH=none",
+        "PASSWORD=",
+        "DOCKER_USER=coder",
         "CS_DISABLE_GETTING_STARTED_OVERRIDE=1",
+        "CS_DISABLE_TELEMETRY=true",
+        "CS_DISABLE_UPDATE_CHECK=true",
       ],
+      Cmd: ["--auth=none", "--bind-addr=0.0.0.0:8080", "."],
+      WorkingDir: "/home/coder/project/my-react-app",
       Tty: true,
       OpenStdin: true,
       AttachStdin: true,
@@ -107,7 +112,8 @@ app.post("/start-editor", async (req, res) => {
       containerId: container.id,
     });
 
-    const url = `http://localhost:${port}/?folder=/home/coder/project/my-react-app`;
+    // Generate URL without any auth parameters
+    const url = `http://localhost:${port}/?folder=/home/coder/project/my-react-app&autostart=1`;
     console.log("Editor URL:", url);
 
     // Return the URL to access the code-server

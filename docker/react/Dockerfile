@@ -24,10 +24,19 @@ RUN code-server --install-extension dsznajder.es7-react-js-snippets && \
 
 # Configure code-server to run without authentication
 RUN mkdir -p /home/coder/.config/code-server && \
-    echo "auth: none\nbind-addr: 0.0.0.0:8080\ncert: false" > /home/coder/.config/code-server/config.yaml
+    echo "bind-addr: 0.0.0.0:8080\nauth: none\nsecurity.workspace.trust.enabled: false\ncert: false" > /home/coder/.config/code-server/config.yaml && \
+    mkdir -p /home/coder/bin && \
+    echo '#!/bin/sh\nexec code-server --auth none --disable-telemetry --disable-update-check --bind-addr 0.0.0.0:8080 "$@"' > /home/coder/bin/entrypoint.sh && \
+    chmod +x /home/coder/bin/entrypoint.sh
 
 # Expose the default code-server port
 EXPOSE 8080
 
-# Start code-server
-CMD ["code-server", "--auth", "none", "--bind-addr", "0.0.0.0:8080", "."] 
+# Set environment variables
+ENV CS_DISABLE_AUTH=true \
+    CS_AUTH=none \
+    PASSWORD= \
+    PATH="/home/coder/bin:${PATH}"
+
+# Start code-server with explicit no authentication
+ENTRYPOINT ["/home/coder/bin/entrypoint.sh", "--auth", "none", "--bind-addr", "0.0.0.0:8080", "--disable-telemetry", "--disable-update-check", "."] 
