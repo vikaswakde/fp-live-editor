@@ -7,6 +7,26 @@ const execAsync = promisify(exec);
 // Keep track of running containers
 const activeContainers = new Map();
 
+// Add template-specific configurations
+const templateConfig = {
+  react: {
+    folderName: "my-react-app",
+    workDir: "/home/coder/project/my-react-app",
+  },
+  node: {
+    folderName: "node-app",
+    workDir: "/home/coder/project/node-app",
+  },
+  python: {
+    folderName: "python-app",
+    workDir: "/home/coder/project/python-app",
+  },
+  vue: {
+    folderName: "vue-app",
+    workDir: "/home/coder/project/vue-app",
+  },
+};
+
 // Function to check Docker connection
 async function checkDockerConnection() {
   try {
@@ -14,9 +34,26 @@ async function checkDockerConnection() {
       socketPath: "/var/run/docker.sock",
       host: null,
     });
-    await docker.ping();
+
+    // Test connection and get Docker info
+    const info = await docker.info();
+    console.log(
+      "Docker connection successful. Server version:",
+      info.ServerVersion
+    );
+
+    // Test image listing to verify API access
+    const images = await docker.listImages();
+    console.log("Successfully listed images. Count:", images.length);
+
     return docker;
   } catch (error) {
+    console.error("Docker connection error:", {
+      message: error.message,
+      code: error.code,
+      statusCode: error.statusCode,
+    });
+
     if (error.code === "ECONNREFUSED") {
       throw new Error(
         "Cannot connect to Docker. Please ensure Docker is running and you have proper permissions. Try:\n" +
@@ -41,12 +78,17 @@ async function startEditor(template) {
 
     const port = 8000 + Math.floor(Math.random() * 1000);
     const imageName = `code-server-${template}:latest`;
+    const config = templateConfig[template];
+
+    if (!config) {
+      throw new Error(`Invalid template: ${template}`);
+    }
 
     // Check and build image if needed
     await ensureImageExists(template);
 
     // Create and start container
-    const container = await createContainer(imageName, port);
+    const container = await createContainer(imageName, port, config);
     await container.start();
 
     // Wait for container to start
@@ -58,11 +100,12 @@ async function startEditor(template) {
       port,
       startTime: new Date(),
       containerId: container.id,
+      workDir: config.workDir,
     };
     activeContainers.set(container.id, containerInfo);
 
-    // Return editor URL
-    const url = `http://localhost:${port}/?folder=/home/coder/project/my-react-app&autostart=1`;
+    // Return editor URL with template-specific folder
+    const url = `http://localhost:${port}/?folder=${config.workDir}&autostart=1`;
     return { url };
   } catch (error) {
     console.error("Error starting editor:", error);
@@ -74,58 +117,186 @@ async function ensureImageExists(template) {
   const imageName = `code-server-${template}:latest`;
   const maxRetries = 3;
   const retryDelay = 2000; // 2 seconds
+  let buildOutput = "";
 
   async function verifyImage() {
     try {
-      const image = await docker.getImage(imageName).inspect();
-      return image !== null;
+      console.log(`Attempting to verify image: ${imageName}`);
+
+      // Get all images including intermediates
+      const allImages = await docker.listImages({ all: true });
+      console.log(
+        "All images (including intermediates):",
+        allImages.map((img) => ({
+          RepoTags: img.RepoTags || [],
+          Id: img.Id,
+          Created: new Date(img.Created * 1000).toISOString(),
+        }))
+      );
+
+      // Look for our image by tag first
+      let foundImage = allImages.find(
+        (img) => img.RepoTags && img.RepoTags.includes(imageName)
+      );
+
+      if (!foundImage && buildOutput) {
+        // Try to parse the build output to get the image ID
+        const buildOutputMatch = /writing image sha256:([a-f0-9]+)/.exec(
+          buildOutput
+        );
+        if (buildOutputMatch) {
+          const builtImageId = `sha256:${buildOutputMatch[1]}`;
+          console.log(
+            "Looking for image with ID from build output:",
+            builtImageId
+          );
+
+          // Try direct inspection first
+          try {
+            const inspectedImage = await docker
+              .getImage(builtImageId)
+              .inspect();
+            console.log("Found image by direct ID inspection:", {
+              id: inspectedImage.Id,
+              repoTags: inspectedImage.RepoTags,
+              created: inspectedImage.Created,
+            });
+            foundImage = { Id: builtImageId };
+          } catch (inspectError) {
+            console.log("Direct inspection failed:", inspectError.message);
+            // Fall back to searching in list
+            foundImage = allImages.find((img) => img.Id === builtImageId);
+          }
+        }
+      }
+
+      if (!foundImage) {
+        // Try one last direct inspection of the image by name
+        try {
+          const inspectedImage = await docker.getImage(imageName).inspect();
+          console.log("Found image by direct name inspection:", {
+            id: inspectedImage.Id,
+            repoTags: inspectedImage.RepoTags,
+            created: inspectedImage.Created,
+          });
+          foundImage = { Id: inspectedImage.Id };
+        } catch (inspectError) {
+          console.log("Direct name inspection failed:", inspectError.message);
+          console.log(
+            `Image ${imageName} not found in ${allImages.length} images`
+          );
+          return false;
+        }
+      }
+
+      // Try to tag the image if needed
+      if (!foundImage.RepoTags?.includes(imageName)) {
+        console.log(
+          `Image found but missing tag ${imageName}, attempting to tag it...`
+        );
+        try {
+          const image = docker.getImage(foundImage.Id);
+          await image.tag({ repo: `code-server-${template}`, tag: "latest" });
+          console.log("Successfully tagged image");
+
+          // Verify the tag was applied
+          const taggedImage = await image.inspect();
+          console.log("Tagged image verification:", {
+            id: taggedImage.Id,
+            repoTags: taggedImage.RepoTags,
+          });
+        } catch (tagError) {
+          console.error("Error tagging image:", tagError);
+        }
+      }
+
+      return true;
     } catch (error) {
+      console.error("Image verification error:", error);
       return false;
     }
   }
 
-  // First, check if image exists
+  // First try to verify existing image
   if (await verifyImage()) {
-    console.log(`Image ${imageName} found locally`);
+    console.log(`✅ Image ${imageName} found and verified locally`);
     return;
   }
 
-  console.log(`Image ${imageName} not found locally, building...`);
-
+  // Force rebuild if verification fails
+  console.log(`Image ${imageName} not found locally, forcing rebuild...`);
   try {
-    // Get project root directory
     const projectRoot = path.resolve(__dirname, "../../../");
-    const buildScript = path.join(
+    const templateDir = path.join(projectRoot, "docker/templates", template);
+
+    console.log("Building with paths:", {
       projectRoot,
-      "docker/scripts/build-images.sh"
+      templateDir,
+      currentDir: __dirname,
+    });
+
+    // Verify template directory exists
+    const { stdout: lsOutput } = await execAsync(`ls -la "${templateDir}"`);
+    console.log(`Template directory contents:`, lsOutput);
+
+    // Build using Docker API directly
+    console.log(`Building image ${imageName} from ${templateDir}...`);
+
+    const stream = await docker.buildImage(
+      {
+        context: templateDir,
+        src: ["Dockerfile", "template/"],
+      },
+      {
+        t: imageName,
+        forcerm: true,
+        nocache: true,
+        dockerfile: "Dockerfile",
+      }
     );
 
-    // Build specific template
-    const { stdout, stderr } = await execAsync(`${buildScript} -t ${template}`);
-    console.log("Build output:", stdout);
-    if (stderr) console.error("Build stderr:", stderr);
+    // Collect build output
+    let buildLogs = "";
+    await new Promise((resolve, reject) => {
+      docker.modem.followProgress(
+        stream,
+        (err, res) => (err ? reject(err) : resolve(res)),
+        (event) => {
+          if (event.stream) {
+            buildLogs += event.stream;
+            console.log("Build progress:", event.stream.trim());
+          }
+        }
+      );
+    });
 
-    // Wait for image to be available with retries
+    buildOutput = buildLogs;
+    console.log("Build completed. Full logs:", buildLogs);
+
+    // Wait for image with retries
     for (let i = 0; i < maxRetries; i++) {
       console.log(`Verifying image build (attempt ${i + 1}/${maxRetries})...`);
-      await new Promise((resolve) => setTimeout(resolve, retryDelay));
-
       if (await verifyImage()) {
         console.log(`Image ${imageName} successfully verified`);
         return;
       }
+      await new Promise((resolve) => setTimeout(resolve, retryDelay));
     }
 
     throw new Error(`Image verification failed after ${maxRetries} attempts`);
   } catch (buildError) {
-    console.error("Failed to build image:", buildError);
+    console.error("Failed to build image:", {
+      error: buildError.message,
+      stack: buildError.stack,
+      stdout: buildOutput,
+    });
     throw new Error(
       `Failed to build ${template} template: ${buildError.message}`
     );
   }
 }
 
-async function createContainer(imageName, port) {
+async function createContainer(imageName, port, config) {
   const containerConfig = {
     Image: imageName,
     ExposedPorts: {
@@ -146,7 +317,7 @@ async function createContainer(imageName, port) {
       "CS_DISABLE_UPDATE_CHECK=true",
     ],
     Cmd: ["--auth=none", "--bind-addr=0.0.0.0:8080", "."],
-    WorkingDir: "/home/coder/project/my-react-app",
+    WorkingDir: config.workDir,
     Tty: true,
     OpenStdin: true,
     AttachStdin: true,
